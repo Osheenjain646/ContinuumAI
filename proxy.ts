@@ -3,11 +3,13 @@ import { NextResponse } from "next/server";
 
 export default auth((req) => {
   const { pathname } = req.nextUrl;
-  const isLoggedIn = !!req.auth;
+  const isLoggedIn = Boolean(req.auth);
 
   // Public routes
   const publicRoutes = ["/login", "/register"];
-  const isPublic = publicRoutes.some((r) => pathname.startsWith(r));
+  const isPublic =
+    publicRoutes.some((r) => pathname.startsWith(r)) ||
+    (pathname === "/api/users" && req.method === "POST");
   const isApiAuth = pathname.startsWith("/api/auth");
 
   if (isApiAuth) return NextResponse.next();
@@ -24,4 +26,3 @@ export default auth((req) => {
 export const config = {
   matcher: ["/((?!_next/static|_next/image|favicon.ico|public/).*)"],
 };
-

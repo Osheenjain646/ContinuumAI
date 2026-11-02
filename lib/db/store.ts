@@ -1,50 +1,71 @@
-/**
- * File-based JSON database (no external DB required)
- * Stores users, integration configs, and dossiers as JSON files in /data/
- *
- * In production, swap this for Postgres/Supabase/PlanetScale.
- */
-
-import fs from "fs";
-import path from "path";
 import { v4 as uuidv4 } from "uuid";
 import bcrypt from "bcryptjs";
+import type { Document } from "mongodb";
 import type { UserIntegrations, StoredDossier, UserRecord } from "@/types";
+import { getMongoDatabase } from "@/lib/db/mongodb";
 
-const DATA_DIR = path.join(process.cwd(), "data");
+export const INTEGRATION_SECRET_MASK = "••••••••";
+const INTEGRATION_SECRET_KEYS = new Set([
+  "token",
+  "apiToken",
+  "appPassword",
+  "botToken",
+  "userToken",
+  "accessToken",
+  "apiKey",
+  "zoomApiKey",
+  "zoomApiSecret",
+  "googleDocsToken",
+]);
 
-function ensureDir(dir: string) {
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+type UserDocument = UserRecord & Document & { emailNormalized: string };
+type IntegrationDocument = UserIntegrations & Document;
+type DossierDocument = StoredDossier & Document;
+
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
-function readJson<T>(filePath: string, fallback: T): T {
-  try {
-    if (!fs.existsSync(filePath)) return fallback;
-    return JSON.parse(fs.readFileSync(filePath, "utf-8")) as T;
-  } catch {
-    return fallback;
-  }
+function toUserRecord(document: UserDocument): UserRecord {
+  return Object.fromEntries(
+    Object.entries(document).filter(([key]) => key !== "_id" && key !== "emailNormalized")
+  ) as UserRecord;
 }
 
-function writeJson(filePath: string, data: unknown) {
-  ensureDir(path.dirname(filePath));
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2), "utf-8");
+function isDuplicateEmailError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === 11000
+  );
 }
 
 // ─── Users ─────────────────────────────────────────────────────────────────
 
-const usersFile = path.join(DATA_DIR, "users.json");
-
-export function getUsers(): UserRecord[] {
-  return readJson<UserRecord[]>(usersFile, []);
+export async function getUsers(): Promise<UserRecord[]> {
+  const db = await getMongoDatabase();
+  const users = await db.collection<UserDocument>("users")
+    .find({}, { projection: { emailNormalized: 0 } })
+    .toArray();
+  return users.map(toUserRecord);
 }
 
-export function getUserById(id: string): UserRecord | undefined {
-  return getUsers().find((u) => u.id === id);
+export async function getUserById(id: string): Promise<UserRecord | undefined> {
+  if (!id) return undefined;
+  const db = await getMongoDatabase();
+  const user = await db.collection<UserDocument>("users")
+    .findOne({ id }, { projection: { emailNormalized: 0 } });
+  return user ? toUserRecord(user) : undefined;
 }
 
-export function getUserByEmail(email: string): UserRecord | undefined {
-  return getUsers().find((u) => u.email.toLowerCase() === email.toLowerCase());
+export async function getUserByEmail(email: string): Promise<UserRecord | undefined> {
+  const emailNormalized = email.trim().toLowerCase();
+  if (!emailNormalized) return undefined;
+  const db = await getMongoDatabase();
+  const user = await db.collection<UserDocument>("users")
+    .findOne({ emailNormalized }, { projection: { emailNormalized: 0 } });
+  return user ? toUserRecord(user) : undefined;
 }
 
 export async function createUser(
@@ -52,21 +73,33 @@ export async function createUser(
   email: string,
   password: string
 ): Promise<UserRecord> {
-  const users = getUsers();
-  if (users.find((u) => u.email.toLowerCase() === email.toLowerCase())) {
+  const normalizedName = name.trim();
+  const normalizedEmail = email.trim().toLowerCase();
+  if (!normalizedName || !normalizedEmail || password.length < 8) {
+    throw new Error("Name, valid email, and a password of at least 8 characters are required.");
+  }
+
+  const db = await getMongoDatabase();
+  const users = db.collection<UserDocument>("users");
+  if (await users.findOne({ emailNormalized: normalizedEmail }, { projection: { _id: 1 } })) {
     throw new Error("Email already registered");
   }
-  const hashed = await bcrypt.hash(password, 12);
+
   const user: UserRecord = {
     id: uuidv4(),
-    name,
-    email,
-    passwordHash: hashed,
+    name: normalizedName,
+    email: normalizedEmail,
+    passwordHash: await bcrypt.hash(password, 12),
     createdAt: new Date().toISOString(),
-    avatarUrl: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(name)}`,
+    avatarUrl: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(normalizedName)}`,
   };
-  users.push(user);
-  writeJson(usersFile, users);
+
+  try {
+    await users.insertOne({ ...user, emailNormalized: normalizedEmail });
+  } catch (error) {
+    if (isDuplicateEmailError(error)) throw new Error("Email already registered");
+    throw error;
+  }
   return user;
 }
 
@@ -74,98 +107,174 @@ export async function verifyUser(
   email: string,
   password: string
 ): Promise<UserRecord | null> {
-  const user = getUserByEmail(email);
+  const user = await getUserByEmail(email);
   if (!user) return null;
-  const ok = await bcrypt.compare(password, user.passwordHash);
-  return ok ? user : null;
+  return await bcrypt.compare(password, user.passwordHash) ? user : null;
 }
 
 // ─── Integrations ───────────────────────────────────────────────────────────
 
-function integrationsFile(userId: string) {
-  return path.join(DATA_DIR, "integrations", `${userId}.json`);
+export async function getUserIntegrations(userId: string): Promise<UserIntegrations> {
+  const db = await getMongoDatabase();
+  const integration = await db.collection<IntegrationDocument>("integrations")
+    .findOne({ userId });
+  if (!integration) {
+    return { userId, updatedAt: new Date().toISOString() };
+  }
+  return Object.fromEntries(
+    Object.entries(integration).filter(([key]) => key !== "_id")
+  ) as UserIntegrations;
 }
 
-export function getUserIntegrations(userId: string): UserIntegrations {
-  return readJson<UserIntegrations>(integrationsFile(userId), {
-    userId,
-    updatedAt: new Date().toISOString(),
-  });
+function mergeIntegrationConfig(
+  existing: unknown,
+  incoming: unknown,
+  key = ""
+): unknown {
+  if (
+    INTEGRATION_SECRET_KEYS.has(key) &&
+    incoming === INTEGRATION_SECRET_MASK &&
+    typeof existing === "string"
+  ) {
+    return existing;
+  }
+
+  if (!incoming || typeof incoming !== "object" || Array.isArray(incoming)) {
+    return incoming;
+  }
+
+  const previous =
+    existing && typeof existing === "object" && !Array.isArray(existing)
+      ? (existing as Record<string, unknown>)
+      : {};
+  const next = incoming as Record<string, unknown>;
+  const merged: Record<string, unknown> = { ...next };
+
+  for (const secretKey of INTEGRATION_SECRET_KEYS) {
+    if (!(secretKey in next) && typeof previous[secretKey] === "string") {
+      merged[secretKey] = previous[secretKey];
+    }
+  }
+  for (const [field, value] of Object.entries(next)) {
+    merged[field] = mergeIntegrationConfig(previous[field], value, field);
+  }
+  return merged;
 }
 
-export function saveUserIntegrations(
+export function maskIntegrationSecrets(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(maskIntegrationSecrets);
+  if (!value || typeof value !== "object") return value;
+
+  return Object.fromEntries(
+    Object.entries(value).map(([key, fieldValue]) => [
+      key,
+      INTEGRATION_SECRET_KEYS.has(key) && fieldValue
+        ? INTEGRATION_SECRET_MASK
+        : maskIntegrationSecrets(fieldValue),
+    ])
+  );
+}
+
+export async function saveUserIntegrations(
   userId: string,
   data: Partial<UserIntegrations>
-): UserIntegrations {
-  const existing = getUserIntegrations(userId);
+): Promise<UserIntegrations> {
+  const existing = await getUserIntegrations(userId);
+  const merged: Record<string, unknown> = { ...existing, ...data };
+  for (const [section, value] of Object.entries(data)) {
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      merged[section] = mergeIntegrationConfig(
+        (existing as unknown as Record<string, unknown>)[section],
+        value
+      );
+    }
+  }
   const updated: UserIntegrations = {
-    ...existing,
-    ...data,
+    ...(merged as unknown as UserIntegrations),
     userId,
     updatedAt: new Date().toISOString(),
   };
-  writeJson(integrationsFile(userId), updated);
+  const db = await getMongoDatabase();
+  await db.collection<IntegrationDocument>("integrations").replaceOne(
+    { userId },
+    updated,
+    { upsert: true }
+  );
   return updated;
 }
 
 // ─── Dossiers ───────────────────────────────────────────────────────────────
 
-function dossiersDir(userId: string) {
-  return path.join(DATA_DIR, "dossiers", userId);
+export async function getUserDossiers(userId: string): Promise<StoredDossier[]> {
+  const db = await getMongoDatabase();
+  const dossiers = await db.collection<DossierDocument>("dossiers")
+    .find({ ownerId: userId })
+    .sort({ generatedAt: -1 })
+    .toArray();
+  return dossiers.map((dossier) => Object.fromEntries(
+    Object.entries(dossier).filter(([key]) => key !== "_id")
+  ) as StoredDossier);
 }
 
-export function getUserDossiers(userId: string): StoredDossier[] {
-  const dir = dossiersDir(userId);
-  if (!fs.existsSync(dir)) return [];
-  return fs
-    .readdirSync(dir)
-    .filter((f) => f.endsWith(".json"))
-    .map((f) =>
-      readJson<StoredDossier>(path.join(dir, f), null as unknown as StoredDossier)
-    )
-    .filter(Boolean)
-    .sort(
-      (a, b) =>
-        new Date(b.generatedAt).getTime() - new Date(a.generatedAt).getTime()
-    );
-}
-
-export function getDossierById(
+export async function getDossierById(
   userId: string,
   dossierId: string
-): StoredDossier | undefined {
-  const filePath = path.join(dossiersDir(userId), `${dossierId}.json`);
-  return readJson<StoredDossier | undefined>(filePath, undefined);
+): Promise<StoredDossier | undefined> {
+  if (!isUuid(dossierId)) return undefined;
+  const db = await getMongoDatabase();
+  const dossier = await db.collection<DossierDocument>("dossiers")
+    .findOne({ ownerId: userId, id: dossierId });
+  if (!dossier) return undefined;
+  return Object.fromEntries(
+    Object.entries(dossier).filter(([key]) => key !== "_id")
+  ) as StoredDossier;
 }
 
-export function saveDossier(userId: string, dossier: StoredDossier): StoredDossier {
-  const dir = dossiersDir(userId);
-  ensureDir(dir);
-  const filePath = path.join(dir, `${dossier.id}.json`);
-  writeJson(filePath, dossier);
+export async function saveDossier(
+  userId: string,
+  dossier: StoredDossier
+): Promise<StoredDossier> {
+  if (!isUuid(dossier.id)) throw new Error("Invalid dossier ID");
+  if (dossier.ownerId !== userId) throw new Error("Dossier owner does not match");
+  const db = await getMongoDatabase();
+  await db.collection<DossierDocument>("dossiers").replaceOne(
+    { ownerId: userId, id: dossier.id },
+    dossier,
+    { upsert: true }
+  );
   return dossier;
 }
 
-export function updateDossierSection(
+export async function updateDossierSection(
   userId: string,
   dossierId: string,
   updates: Partial<StoredDossier>
-): StoredDossier | null {
-  const existing = getDossierById(userId, dossierId);
-  if (!existing) return null;
-  const updated: StoredDossier = {
-    ...existing,
-    ...updates,
-    lastUpdated: new Date().toISOString(),
-  };
-  saveDossier(userId, updated);
-  return updated;
+): Promise<StoredDossier | null> {
+  if (!isUuid(dossierId)) return null;
+  const db = await getMongoDatabase();
+  const safeUpdates = Object.fromEntries(
+    Object.entries(updates).filter(([key]) => key !== "id" && key !== "ownerId")
+  );
+  const result = await db.collection<DossierDocument>("dossiers").updateOne(
+    { ownerId: userId, id: dossierId },
+    {
+      $set: {
+        ...safeUpdates,
+        lastUpdated: new Date().toISOString(),
+      },
+    }
+  );
+  if (!result.matchedCount) return null;
+  return (await getDossierById(userId, dossierId)) ?? null;
 }
 
-export function deleteDossier(userId: string, dossierId: string): boolean {
-  const filePath = path.join(dossiersDir(userId), `${dossierId}.json`);
-  if (!fs.existsSync(filePath)) return false;
-  fs.unlinkSync(filePath);
-  return true;
+export async function deleteDossier(
+  userId: string,
+  dossierId: string
+): Promise<boolean> {
+  if (!isUuid(dossierId)) return false;
+  const db = await getMongoDatabase();
+  const result = await db.collection<DossierDocument>("dossiers")
+    .deleteOne({ ownerId: userId, id: dossierId });
+  return result.deletedCount > 0;
 }
-

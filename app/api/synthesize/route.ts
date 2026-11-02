@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { synthesizeDossier } from "@/lib/synthesize";
-import type { SynthesizeRequest } from "@/types";
+import { synthesizeDossier, type SynthesizeRequest } from "@/lib/synthesize";
 
 export async function POST(req: NextRequest) {
   try {
@@ -30,4 +29,3 @@ export async function POST(req: NextRequest) {
     );
   }
 }
-

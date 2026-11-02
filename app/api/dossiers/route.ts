@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { getUserDossiers, saveDossier, getDossierById } from "@/lib/db/store";
+import { getUserDossiers, saveDossier } from "@/lib/db/store";
 import { v4 as uuidv4 } from "uuid";
 import type { StoredDossier, EmployeeInfo } from "@/types";
 
@@ -9,7 +9,7 @@ export async function GET() {
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const dossiers = getUserDossiers(session.user.id);
+  const dossiers = await getUserDossiers(session.user.id);
   // Return summary list (without full rawActivity to keep response small)
   const summaries = dossiers.map(({ rawActivity, sections, ...rest }) => ({
     ...rest,
@@ -40,6 +40,7 @@ export async function POST(req: NextRequest) {
     lastUpdated: now,
     status: "pending",
     progress: 0,
+    fetchWarnings: [],
     readinessScore: 0,
     readinessBreakdown: { activeWork: 0, serviceOwnership: 0, implicitKnowledge: 0, securityAudit: 0 },
     sections: {
@@ -51,7 +52,6 @@ export async function POST(req: NextRequest) {
     rawActivity: { commits: [], pullRequests: [], slackMessages: [], meetingTranscripts: [], docs: [] },
   };
 
-  saveDossier(session.user.id, dossier);
+  await saveDossier(session.user.id, dossier);
   return NextResponse.json(dossier, { status: 201 });
 }
-

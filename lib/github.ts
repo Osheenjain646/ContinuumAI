@@ -7,8 +7,15 @@ import type {
   GitHubCommit,
   GitHubPR,
   GitHubBranch,
-  FetchGitHubActivityRequest,
 } from "@/types";
+
+// Legacy request type — used internally by this driver only
+interface FetchGitHubActivityRequest {
+  username: string;
+  token?: string;
+  org?: string;
+  daysBack?: number;
+}
 
 const GITHUB_API_BASE = "https://api.github.com";
 
@@ -48,7 +55,6 @@ export async function fetchUserCommits(
     Date.now() - daysBack * 24 * 60 * 60 * 1000
   ).toISOString();
 
-  // Search for commits by the user
   const searchUrl = `${GITHUB_API_BASE}/search/commits?q=author:${encodeURIComponent(username)}+author-date:>${since}&sort=author-date&order=desc&per_page=50`;
 
   try {
@@ -67,7 +73,7 @@ export async function fetchUserCommits(
 
     return data.items.map((item) => ({
       sha: item.sha.slice(0, 7),
-      message: item.commit.message.split("\n")[0], // first line only
+      message: item.commit.message.split("\n")[0],
       author: item.commit.author.name,
       date: item.commit.author.date,
       url: item.html_url,
@@ -151,7 +157,6 @@ export async function fetchUserBranches(
   if (!org) return [];
 
   try {
-    // List repos for the org and find branches associated with the user
     const reposUrl = `${GITHUB_API_BASE}/orgs/${encodeURIComponent(org)}/repos?per_page=50&sort=updated`;
     const repos = await githubFetch<{ name: string; full_name: string }[]>(
       reposUrl,
@@ -161,7 +166,6 @@ export async function fetchUserBranches(
     const branchResults: GitHubBranch[] = [];
 
     for (const repo of repos.slice(0, 10)) {
-      // Limit to 10 repos for rate limits
       try {
         const branchesUrl = `${GITHUB_API_BASE}/repos/${repo.full_name}/branches?per_page=100`;
         const branches = await githubFetch<
@@ -206,4 +210,3 @@ export async function fetchAllGitHubActivity(req: FetchGitHubActivityRequest) {
 
   return { commits, pullRequests, branches };
 }
-

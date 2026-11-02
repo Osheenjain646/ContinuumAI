@@ -3,8 +3,8 @@ import { fetchAllSlackActivity } from "@/lib/slack";
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const { userId, token, daysBack, channels } = body;
+    const body = await req.json() as { userId: string; token?: string; daysBack?: number; channelIds?: string[] };
+    const { userId, token, daysBack, channelIds } = body;
 
     if (!userId) {
       return NextResponse.json(
@@ -17,7 +17,7 @@ export async function POST(req: NextRequest) {
       userId,
       token: token || process.env.SLACK_BOT_TOKEN,
       daysBack: daysBack ?? 30,
-      channels,
+      channelIds,
     });
 
     return NextResponse.json(data);
@@ -29,4 +29,3 @@ export async function POST(req: NextRequest) {
     );
   }
 }
-
