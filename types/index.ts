@@ -1,4 +1,103 @@
-// ─── Core Data Types for Continuum AI ───────────────────────────────────────
+// ─── Auth & User Types ────────────────────────────────────────────────────────
+
+export interface UserRecord {
+  id: string;
+  name: string;
+  email: string;
+  passwordHash: string;
+  createdAt: string;
+  avatarUrl?: string;
+}
+
+// ─── Integration Config Types ─────────────────────────────────────────────────
+
+export interface GitHubIntegration {
+  token?: string;            // PAT with repo, read:user
+  username?: string;         // GitHub username of the departing employee
+  orgOrRepoUrl?: string;     // e.g. https://github.com/acmecorp or a specific repo
+  repos?: string[];          // specific repos to track: ["org/repo1", "org/repo2"]
+}
+
+export interface GitLabIntegration {
+  token?: string;
+  baseUrl?: string;          // defaults to https://gitlab.com
+  username?: string;
+  projectIds?: string[];     // numeric project IDs or "namespace/project"
+}
+
+export interface BitbucketIntegration {
+  username?: string;
+  appPassword?: string;
+  workspace?: string;
+  repoSlugs?: string[];
+}
+
+export interface SlackIntegration {
+  botToken?: string;         // xoxb-...
+  userToken?: string;        // xoxp-... (for search)
+  userId?: string;           // the departing employee's Slack user ID
+  channelIds?: string[];     // specific channels to scan
+}
+
+export interface NotionIntegration {
+  token?: string;            // Notion internal integration token
+  pageUrls?: string[];       // specific Notion page URLs to index
+  databaseIds?: string[];    // Notion database IDs
+}
+
+export interface JiraIntegration {
+  baseUrl?: string;          // e.g. https://acmecorp.atlassian.net
+  email?: string;
+  apiToken?: string;
+  accountId?: string;        // Jira account ID of departing employee
+  projectKeys?: string[];    // e.g. ["INFRA", "PLAT"]
+}
+
+export interface MeetingIntegration {
+  transcriptUrls?: string[]; // Direct URLs to transcript files / Google Docs
+  googleDocsToken?: string;  // OAuth token for Google Docs
+  zoomApiKey?: string;
+  zoomApiSecret?: string;
+}
+
+export interface LinearIntegration {
+  apiKey?: string;
+  teamIds?: string[];
+  memberId?: string;
+}
+
+export interface ConfluenceIntegration {
+  baseUrl?: string;
+  email?: string;
+  apiToken?: string;
+  spaceKeys?: string[];
+}
+
+export interface AsanaIntegration {
+  accessToken?: string;
+  workspaceId?: string;
+  userId?: string;
+}
+
+export interface UserIntegrations {
+  userId: string;
+  updatedAt: string;
+  // Integrations — all optional
+  github?: GitHubIntegration;
+  gitlab?: GitLabIntegration;
+  bitbucket?: BitbucketIntegration;
+  slack?: SlackIntegration;
+  notion?: NotionIntegration;
+  jira?: JiraIntegration;
+  meetings?: MeetingIntegration;
+  linear?: LinearIntegration;
+  confluence?: ConfluenceIntegration;
+  asana?: AsanaIntegration;
+  // Custom/company-specific integrations as key-value pairs
+  custom?: Record<string, { label: string; url?: string; token?: string; notes?: string }>;
+}
+
+// ─── Core Data Types (unchanged from previous) ───────────────────────────────
 
 export interface GitHubCommit {
   sha: string;
@@ -54,7 +153,7 @@ export interface MeetingTranscript {
   id: string;
   title: string;
   date: string;
-  duration: number; // minutes
+  duration: number;
   participants: string[];
   actionItems: string[];
   decisions: string[];
@@ -66,7 +165,7 @@ export interface DocPage {
   id: string;
   title: string;
   url: string;
-  source: "google-docs" | "notion";
+  source: "google-docs" | "notion" | "confluence" | "jira" | "linear" | "custom";
   lastModified: string;
   snippet: string;
   tags?: string[];
@@ -75,28 +174,17 @@ export interface DocPage {
 export interface SecretRiskAlert {
   id: string;
   severity: "critical" | "high" | "medium" | "low";
-  type:
-    | "hardcoded-pat"
-    | "api-key"
-    | "ssh-key"
-    | "cloud-resource"
-    | "unrotated-secret";
+  type: "hardcoded-pat" | "api-key" | "ssh-key" | "cloud-resource" | "unrotated-secret";
   description: string;
-  location: string; // e.g. "github:org/repo#file.ts:42"
+  location: string;
   sourceUrl?: string;
-  detected: string; // ISO date
+  detected: string;
   recommendation: string;
 }
 
 export interface OwnedService {
   name: string;
-  type:
-    | "microservice"
-    | "repository"
-    | "api"
-    | "script"
-    | "pipeline"
-    | "infra";
+  type: "microservice" | "repository" | "api" | "script" | "pipeline" | "infra";
   description: string;
   repo?: string;
   deploymentUrl?: string;
@@ -109,7 +197,7 @@ export interface TechDebtItem {
   id: string;
   title: string;
   description: string;
-  source: "slack" | "github-pr" | "github-commit" | "notion" | "google-docs";
+  source: "slack" | "github-pr" | "github-commit" | "notion" | "google-docs" | "jira" | "gitlab" | "bitbucket";
   sourceUrl: string;
   severity: "high" | "medium" | "low";
   category: "workaround" | "unwritten-rule" | "architectural-debt" | "edge-case";
@@ -137,35 +225,14 @@ export interface ActiveWorkSection {
     crossRefs?: CrossReference[];
   }[];
   pendingPRReviews: GitHubPR[];
-  openBugs: {
-    title: string;
-    url: string;
-    severity: string;
-    assignedTo?: string;
-  }[];
-  upcomingDeadlines: {
-    title: string;
-    dueDate: string;
-    description: string;
-  }[];
+  openBugs: { title: string; url: string; severity: string; assignedTo?: string }[];
+  upcomingDeadlines: { title: string; dueDate: string; description: string }[];
 }
 
 export interface ServiceOwnershipSection {
   ownedServices: OwnedService[];
-  repositories: {
-    name: string;
-    url: string;
-    primaryLanguage?: string;
-    description?: string;
-    isPrivate?: boolean;
-  }[];
-  deploymentPipelines: {
-    name: string;
-    description: string;
-    environment: string;
-    lastRun?: string;
-    url?: string;
-  }[];
+  repositories: { name: string; url: string; primaryLanguage?: string; description?: string; isPrivate?: boolean }[];
+  deploymentPipelines: { name: string; description: string; environment: string; lastRun?: string; url?: string }[];
 }
 
 export interface ImplicitKnowledgeSection {
@@ -201,23 +268,31 @@ export interface SecretAuditSection {
   accessRecommendations: string[];
 }
 
-// ─── Full Dossier ────────────────────────────────────────────────────────────
+// ─── Employee Info ────────────────────────────────────────────────────────────
 
-export interface HandoverDossier {
+export interface EmployeeInfo {
+  name: string;
+  email: string;
+  githubUsername?: string;
+  slackUserId?: string;
+  role?: string;
+  team?: string;
+  lastActiveDate?: string;
+  avatarUrl?: string;
+}
+
+// ─── Stored Dossier (persisted to disk) ──────────────────────────────────────
+
+export interface StoredDossier {
   id: string;
-  departingEmployee: {
-    name: string;
-    email: string;
-    githubUsername?: string;
-    slackUserId?: string;
-    role?: string;
-    team?: string;
-    lastActiveDate?: string;
-    avatarUrl?: string;
-  };
+  ownerId: string;       // User ID who created this dossier
+  departingEmployee: EmployeeInfo;
   generatedAt: string;
   lastUpdated: string;
-  readinessScore: number; // 0-100
+  status: "pending" | "fetching" | "synthesizing" | "complete" | "error";
+  progress?: number;     // 0-100
+  errorMessage?: string;
+  readinessScore: number;
   readinessBreakdown: {
     activeWork: number;
     serviceOwnership: number;
@@ -237,10 +312,31 @@ export interface HandoverDossier {
     meetingTranscripts: MeetingTranscript[];
     docs: DocPage[];
   };
-  vectorIndexId?: string;
+  // User edits / overrides on top of AI synthesis
+  userEdits?: {
+    notes?: string;
+    sectionOverrides?: Partial<StoredDossier["sections"]>;
+    editedAt?: string;
+    editedBy?: string;
+  };
 }
 
-// ─── Chat / RAG Types ────────────────────────────────────────────────────────
+// ─── API Request/Response Types ───────────────────────────────────────────────
+
+export interface CreateDossierRequest {
+  departingEmployee: EmployeeInfo;
+}
+
+export interface FetchActivityRequest {
+  dossierId: string;
+  integrations: UserIntegrations;
+  employee: EmployeeInfo;
+}
+
+export interface UpdateDossierRequest {
+  notes?: string;
+  sectionOverrides?: Partial<StoredDossier["sections"]>;
+}
 
 export interface ChatMessage {
   id: string;
@@ -248,58 +344,18 @@ export interface ChatMessage {
   content: string;
   timestamp: string;
   sources?: {
-    type: "github" | "slack" | "meeting" | "doc";
+    type: "github" | "slack" | "meeting" | "doc" | "jira" | "gitlab";
     title: string;
     url: string;
     excerpt?: string;
   }[];
 }
 
-export interface ChatSession {
+// ─── Auth Session ─────────────────────────────────────────────────────────────
+
+export interface SessionUser {
   id: string;
-  dossierId: string;
-  messages: ChatMessage[];
-  createdAt: string;
+  name: string;
+  email: string;
+  avatarUrl?: string;
 }
-
-// ─── API Request / Response Types ────────────────────────────────────────────
-
-export interface FetchGitHubActivityRequest {
-  username: string;
-  token?: string;
-  org?: string;
-  daysBack?: number;
-}
-
-export interface FetchSlackActivityRequest {
-  userId: string;
-  token?: string;
-  daysBack?: number;
-  channels?: string[];
-}
-
-export interface SynthesizeRequest {
-  githubData?: {
-    commits: GitHubCommit[];
-    pullRequests: GitHubPR[];
-    branches: GitHubBranch[];
-  };
-  slackData?: {
-    messages: SlackMessage[];
-  };
-  meetingData?: {
-    transcripts: MeetingTranscript[];
-  };
-  docsData?: {
-    pages: DocPage[];
-  };
-  employeeInfo: HandoverDossier["departingEmployee"];
-}
-
-export interface ChatRequest {
-  dossierId: string;
-  message: string;
-  sessionId?: string;
-  previousInteractionId?: string;
-}
-

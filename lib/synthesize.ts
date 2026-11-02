@@ -1,443 +1,181 @@
 /**
- * AI Summarization & Synthesis Engine
- * Uses Gemini API to compile the 4 dossier sections from raw activity
+ * Updated synthesize.ts — uses new StoredDossier types
  */
 
 import { GoogleGenAI } from "@google/genai";
 import type {
-  SynthesizeRequest,
-  HandoverDossier,
   ActiveWorkSection,
   ServiceOwnershipSection,
   ImplicitKnowledgeSection,
   SecretAuditSection,
+  GitHubCommit,
+  GitHubPR,
+  GitHubBranch,
+  SlackMessage,
+  MeetingTranscript,
+  DocPage,
+  EmployeeInfo,
 } from "@/types";
-import { generateId } from "@/lib/utils";
 
 const client = new GoogleGenAI({});
 const MODEL = "gemini-3.8-flash";
 
-// ─── System prompt for noise filtering ───────────────────────────────────────
-
-const NOISE_FILTER_SYSTEM = `You are an expert software engineering analyst specializing in knowledge transfer and offboarding.
-Your role is to analyze raw developer activity data and extract only HIGH-SIGNAL information.
-
-FILTER OUT (noise):
-- Minor typo fixes, formatting commits, whitespace changes
-- "chore:", "style:", "docs: fix typo" commits  
-- Casual chat messages ("lol", "👍", "sounds good", "will do")
-- Standard meeting pleasantries and scheduling messages
-- Auto-generated bot messages
-
-KEEP (signal):
-- Architecture decisions, design choices, and their rationale
-- Bug fixes with explanations of root causes
-- Workarounds, hacks, and TODO/FIXME items with context
-- Deployment procedures, runbook steps, and operational knowledge
-- Cross-service dependencies and integration points
-- Security-related commits, API key references, credential usage
-- Handoff mentions, role-specific knowledge, and "you'll need to know" moments
-- Unfinished work, open questions, and blockers
-
-Always respond with valid JSON only. No markdown code blocks, no explanation text.`;
-
-// ─── Prompt: Active Work & Blockers ──────────────────────────────────────────
-
-async function synthesizeActiveWork(
-  req: SynthesizeRequest
-): Promise<ActiveWorkSection> {
-  const rawData = {
-    commits: req.githubData?.commits?.slice(0, 20) ?? [],
-    prs: req.githubData?.pullRequests?.filter((pr) => pr.state === "open") ?? [],
-    slackMessages: req.slackData?.messages?.slice(0, 30) ?? [],
-    meetingActionItems: req.meetingData?.transcripts?.flatMap(
-      (t) => t.actionItems
-    ) ?? [],
-  };
-
-  const prompt = `${NOISE_FILTER_SYSTEM}
-
-Analyze this developer activity data for ${req.employeeInfo.name} and extract their active work and blockers.
-
-RAW DATA:
-${JSON.stringify(rawData, null, 2)}
-
-Return a JSON object matching this TypeScript interface:
-{
-  inFlightTasks: Array<{
-    title: string;
-    description: string;
-    status: "blocked" | "in-progress" | "needs-review" | "upcoming";
-    priority: "urgent" | "high" | "medium" | "low";
-    dueDate?: string; // ISO date if determinable
-    sourceUrl?: string;
-    crossRefs?: Array<{
-      slackThreadUrl?: string;
-      githubPrUrl?: string;
-      meetingDecision?: string;
-      docUrl?: string;
-      summary: string;
-    }>;
-  }>;
-  pendingPRReviews: Array<{
-    id: number;
-    number: number;
-    title: string;
-    state: "open";
-    url: string;
-    repo: string;
-    createdAt: string;
-    updatedAt: string;
-  }>;
-  openBugs: Array<{
-    title: string;
-    url: string;
-    severity: string;
-    assignedTo?: string;
-  }>;
-  upcomingDeadlines: Array<{
-    title: string;
-    dueDate: string;
-    description: string;
-  }>;
+export interface SynthesizeRequest {
+  githubData?: { commits: GitHubCommit[]; pullRequests: GitHubPR[]; branches: GitHubBranch[] };
+  slackData?: { messages: SlackMessage[] };
+  meetingData?: { transcripts: MeetingTranscript[] };
+  docsData?: { pages: DocPage[] };
+  employeeInfo: EmployeeInfo;
 }
 
-Only return valid JSON, nothing else.`;
+const NOISE_FILTER_SYSTEM = `You are an expert software engineering analyst specializing in knowledge transfer and offboarding.
+Analyze developer activity and extract only HIGH-SIGNAL information.
+FILTER OUT: Minor typo fixes, formatting commits, casual chat, bot messages.
+KEEP: Architecture decisions, bug root causes, workarounds, deployment procedures, security-related items, handoff notes.
+Always respond with valid JSON only. No markdown code blocks, no explanation text.`;
 
+async function llmJson<T>(prompt: string, fallback: T): Promise<T> {
   try {
-    const interaction = await client.interactions.create({
-      model: MODEL,
-      input: prompt,
-      store: false,
-    });
-
-    const text = interaction.output_text ?? "{}";
-    const cleaned = text.replace(/```json\n?|\n?```/g, "").trim();
-    return JSON.parse(cleaned) as ActiveWorkSection;
-  } catch (err) {
-    console.error("[synthesize] activeWork error:", err);
-    return {
-      inFlightTasks: [],
-      pendingPRReviews: req.githubData?.pullRequests?.filter(pr => pr.state === "open") ?? [],
-      openBugs: [],
-      upcomingDeadlines: [],
-    };
+    const interaction = await client.interactions.create({ model: MODEL, input: prompt, store: false });
+    const text = (interaction.output_text ?? "{}").replace(/```json\n?|\n?```/g, "").trim();
+    return JSON.parse(text) as T;
+  } catch {
+    return fallback;
   }
 }
 
-// ─── Prompt: Service & System Ownership ──────────────────────────────────────
+async function synthesizeActiveWork(req: SynthesizeRequest): Promise<ActiveWorkSection> {
+  const rawData = {
+    commits: req.githubData?.commits?.slice(0, 30) ?? [],
+    openPRs: req.githubData?.pullRequests?.filter((pr) => pr.state === "open") ?? [],
+    slackMessages: req.slackData?.messages?.slice(0, 30) ?? [],
+    meetingActionItems: req.meetingData?.transcripts?.flatMap((t) => t.actionItems) ?? [],
+    jiraIssues: req.docsData?.pages?.filter((p) => p.source === "jira") ?? [],
+    linearIssues: req.docsData?.pages?.filter((p) => p.source === "linear") ?? [],
+  };
 
-async function synthesizeServiceOwnership(
-  req: SynthesizeRequest
-): Promise<ServiceOwnershipSection> {
+  return llmJson<ActiveWorkSection>(`${NOISE_FILTER_SYSTEM}
+
+Analyze this developer activity for ${req.employeeInfo.name} and extract active work and blockers.
+RAW DATA: ${JSON.stringify(rawData, null, 2)}
+
+Return JSON matching:
+{
+  inFlightTasks: Array<{ title: string; description: string; status: "blocked"|"in-progress"|"needs-review"|"upcoming"; priority: "urgent"|"high"|"medium"|"low"; dueDate?: string; sourceUrl?: string; crossRefs?: Array<{ slackThreadUrl?: string; githubPrUrl?: string; meetingDecision?: string; docUrl?: string; summary: string }> }>;
+  pendingPRReviews: Array<{ id: number; number: number; title: string; state: "open"; url: string; repo: string; createdAt: string; updatedAt: string }>;
+  openBugs: Array<{ title: string; url: string; severity: string; assignedTo?: string }>;
+  upcomingDeadlines: Array<{ title: string; dueDate: string; description: string }>;
+}`, {
+    inFlightTasks: [],
+    pendingPRReviews: req.githubData?.pullRequests?.filter(pr => pr.state === "open") ?? [],
+    openBugs: [],
+    upcomingDeadlines: [],
+  });
+}
+
+async function synthesizeServiceOwnership(req: SynthesizeRequest): Promise<ServiceOwnershipSection> {
   const rawData = {
     commits: req.githubData?.commits?.slice(0, 30) ?? [],
     prs: req.githubData?.pullRequests ?? [],
-    branches: req.githubData?.branches ?? [],
-    slackMessages: req.slackData?.messages?.slice(0, 30) ?? [],
     docs: req.docsData?.pages ?? [],
+    slackMessages: req.slackData?.messages?.slice(0, 20) ?? [],
   };
 
-  const prompt = `${NOISE_FILTER_SYSTEM}
+  return llmJson<ServiceOwnershipSection>(`${NOISE_FILTER_SYSTEM}
 
-Analyze this developer activity to identify ALL services, repositories, APIs, scripts, and deployment pipelines that ${req.employeeInfo.name} owns or primarily maintains.
+Identify ALL services, repositories, APIs, scripts, and deployment pipelines that ${req.employeeInfo.name} owns.
+RAW DATA: ${JSON.stringify(rawData, null, 2)}
 
-RAW DATA:
-${JSON.stringify(rawData, null, 2)}
-
-Return a JSON object matching:
+Return JSON matching:
 {
-  ownedServices: Array<{
-    name: string;
-    type: "microservice" | "repository" | "api" | "script" | "pipeline" | "infra";
-    description: string;
-    repo?: string;
-    deploymentUrl?: string;
-    lastDeployed?: string;
-    coOwners?: string[];
-    tags?: string[];
-  }>;
-  repositories: Array<{
-    name: string;
-    url: string;
-    primaryLanguage?: string;
-    description?: string;
-    isPrivate?: boolean;
-  }>;
-  deploymentPipelines: Array<{
-    name: string;
-    description: string;
-    environment: string;
-    lastRun?: string;
-    url?: string;
-  }>;
+  ownedServices: Array<{ name: string; type: "microservice"|"repository"|"api"|"script"|"pipeline"|"infra"; description: string; repo?: string; deploymentUrl?: string; lastDeployed?: string; coOwners?: string[]; tags?: string[] }>;
+  repositories: Array<{ name: string; url: string; primaryLanguage?: string; description?: string; isPrivate?: boolean }>;
+  deploymentPipelines: Array<{ name: string; description: string; environment: string; lastRun?: string; url?: string }>;
+}`, { ownedServices: [], repositories: [], deploymentPipelines: [] });
 }
 
-Only return valid JSON.`;
-
-  try {
-    const interaction = await client.interactions.create({
-      model: MODEL,
-      input: prompt,
-      store: false,
-    });
-    const text = interaction.output_text ?? "{}";
-    const cleaned = text.replace(/```json\n?|\n?```/g, "").trim();
-    return JSON.parse(cleaned) as ServiceOwnershipSection;
-  } catch (err) {
-    console.error("[synthesize] serviceOwnership error:", err);
-    return { ownedServices: [], repositories: [], deploymentPipelines: [] };
-  }
-}
-
-// ─── Prompt: Implicit Knowledge & Technical Debt ─────────────────────────────
-
-async function synthesizeImplicitKnowledge(
-  req: SynthesizeRequest
-): Promise<ImplicitKnowledgeSection> {
+async function synthesizeImplicitKnowledge(req: SynthesizeRequest): Promise<ImplicitKnowledgeSection> {
   const rawData = {
     commits: req.githubData?.commits ?? [],
     slackMessages: req.slackData?.messages ?? [],
-    meetingTranscripts: req.meetingData?.transcripts?.map((t) => ({
-      title: t.title,
-      decisions: t.decisions,
-      date: t.date,
-    })) ?? [],
+    meetingDecisions: req.meetingData?.transcripts?.flatMap((t) => t.decisions) ?? [],
     docs: req.docsData?.pages ?? [],
   };
 
-  const prompt = `${NOISE_FILTER_SYSTEM}
+  return llmJson<ImplicitKnowledgeSection>(`${NOISE_FILTER_SYSTEM}
 
-Surface ALL implicit knowledge, technical debt, undocumented workarounds, and architectural decisions from ${req.employeeInfo.name}'s activity.
+Surface ALL implicit knowledge, tech debt, workarounds, and architectural decisions from ${req.employeeInfo.name}'s activity.
+RAW DATA: ${JSON.stringify(rawData, null, 2)}
 
-Focus especially on:
-1. WORKAROUNDS: Temporary fixes, hacks, "this shouldn't be here" code
-2. TECH DEBT: TODO/FIXME items, known fragile systems, manual processes that should be automated
-3. ARCHITECTURAL DECISIONS: Why things were built a certain way, rejected alternatives, specific constraints
-
-RAW DATA:
-${JSON.stringify(rawData, null, 2)}
-
-Return a JSON object matching:
+Return JSON matching:
 {
-  techDebt: Array<{
-    id: string;
-    title: string;
-    description: string;
-    source: "slack" | "github-pr" | "github-commit" | "notion" | "google-docs";
-    sourceUrl: string;
-    severity: "high" | "medium" | "low";
-    category: "workaround" | "unwritten-rule" | "architectural-debt" | "edge-case";
-    tags?: string[];
-  }>;
-  workarounds: Array<{
-    title: string;
-    description: string;
-    affectedSystem: string;
-    sourceUrl: string;
-    crossRefs?: Array<{
-      slackThreadUrl?: string;
-      githubPrUrl?: string;
-      meetingDecision?: string;
-      summary: string;
-    }>;
-  }>;
-  architecturalDecisions: Array<{
-    title: string;
-    rationale: string;
-    alternatives?: string;
-    date: string;
-    participants?: string[];
-    sourceUrl?: string;
-  }>;
+  techDebt: Array<{ id: string; title: string; description: string; source: "slack"|"github-pr"|"github-commit"|"notion"|"google-docs"|"jira"|"gitlab"|"bitbucket"; sourceUrl: string; severity: "high"|"medium"|"low"; category: "workaround"|"unwritten-rule"|"architectural-debt"|"edge-case"; tags?: string[] }>;
+  workarounds: Array<{ title: string; description: string; affectedSystem: string; sourceUrl: string; crossRefs?: Array<{ slackThreadUrl?: string; githubPrUrl?: string; summary: string }> }>;
+  architecturalDecisions: Array<{ title: string; rationale: string; alternatives?: string; date: string; participants?: string[]; sourceUrl?: string }>;
+}`, { techDebt: [], workarounds: [], architecturalDecisions: [] });
 }
 
-Only return valid JSON.`;
-
-  try {
-    const interaction = await client.interactions.create({
-      model: MODEL,
-      input: prompt,
-      store: false,
-    });
-    const text = interaction.output_text ?? "{}";
-    const cleaned = text.replace(/```json\n?|\n?```/g, "").trim();
-    return JSON.parse(cleaned) as ImplicitKnowledgeSection;
-  } catch (err) {
-    console.error("[synthesize] implicitKnowledge error:", err);
-    return { techDebt: [], workarounds: [], architecturalDecisions: [] };
-  }
-}
-
-// ─── Prompt: Secret & Access Audit ───────────────────────────────────────────
-
-async function synthesizeSecretAudit(
-  req: SynthesizeRequest
-): Promise<SecretAuditSection> {
+async function synthesizeSecretAudit(req: SynthesizeRequest): Promise<SecretAuditSection> {
   const rawData = {
     commits: req.githubData?.commits ?? [],
     slackMessages: req.slackData?.messages?.filter((m) =>
-      /key|token|secret|password|credential|auth|api[_-]?key|pat|ssh/i.test(
-        m.text
-      )
+      /key|token|secret|password|credential|auth|api[_-]?key|pat|ssh/i.test(m.text)
     ) ?? [],
     docs: req.docsData?.pages ?? [],
   };
 
-  const prompt = `${NOISE_FILTER_SYSTEM}
+  return llmJson<SecretAuditSection>(`${NOISE_FILTER_SYSTEM}
 
 SECURITY AUDIT: Identify ALL potential security risks related to ${req.employeeInfo.name}'s departure.
+RAW DATA: ${JSON.stringify(rawData, null, 2)}
 
-Look for:
-1. References to API keys, tokens, PATs, secrets in commits or messages
-2. SSH keys or access credentials that may be attributed to this user
-3. Cloud resources (AWS, GCP, Azure) linked to the user's personal account
-4. Unrotated credentials, hardcoded secrets in commit messages
-5. Access that needs to be revoked upon departure
-
-RAW DATA:
-${JSON.stringify(rawData, null, 2)}
-
-Return a JSON object matching:
+Return JSON matching:
 {
-  alerts: Array<{
-    id: string;
-    severity: "critical" | "high" | "medium" | "low";
-    type: "hardcoded-pat" | "api-key" | "ssh-key" | "cloud-resource" | "unrotated-secret";
-    description: string;
-    location: string;
-    sourceUrl?: string;
-    detected: string; // ISO date
-    recommendation: string;
-  }>;
-  cloudResources: Array<{
-    name: string;
-    type: string;
-    provider: string;
-    region?: string;
-    linkedToUser: boolean;
-    status: "active" | "idle" | "orphaned";
-    url?: string;
-  }>;
+  alerts: Array<{ id: string; severity: "critical"|"high"|"medium"|"low"; type: "hardcoded-pat"|"api-key"|"ssh-key"|"cloud-resource"|"unrotated-secret"; description: string; location: string; sourceUrl?: string; detected: string; recommendation: string }>;
+  cloudResources: Array<{ name: string; type: string; provider: string; region?: string; linkedToUser: boolean; status: "active"|"idle"|"orphaned"; url?: string }>;
   accessRecommendations: string[];
+}`, { alerts: [], cloudResources: [], accessRecommendations: [] });
 }
 
-Only return valid JSON.`;
-
-  try {
-    const interaction = await client.interactions.create({
-      model: MODEL,
-      input: prompt,
-      store: false,
-    });
-    const text = interaction.output_text ?? "{}";
-    const cleaned = text.replace(/```json\n?|\n?```/g, "").trim();
-    return JSON.parse(cleaned) as SecretAuditSection;
-  } catch (err) {
-    console.error("[synthesize] secretAudit error:", err);
-    return { alerts: [], cloudResources: [], accessRecommendations: [] };
-  }
-}
-
-// ─── Readiness Score Calculator ───────────────────────────────────────────────
-
-function calculateReadinessScore(dossier: Omit<HandoverDossier, "id" | "generatedAt" | "lastUpdated" | "readinessScore" | "readinessBreakdown">) {
-  const { sections } = dossier;
-
-  // Active work score: lower is better (fewer blockers = more ready)
-  const blockedTasks = sections.activeWork.inFlightTasks.filter(
-    (t) => t.status === "blocked"
-  ).length;
+function calculateReadinessScore(sections: {
+  activeWork: ActiveWorkSection;
+  serviceOwnership: ServiceOwnershipSection;
+  implicitKnowledge: ImplicitKnowledgeSection;
+  secretAudit: SecretAuditSection;
+}) {
+  const blockedTasks = sections.activeWork.inFlightTasks.filter(t => t.status === "blocked").length;
   const pendingPRs = sections.activeWork.pendingPRReviews.length;
-  const activeWorkScore = Math.max(
-    0,
-    100 - blockedTasks * 15 - pendingPRs * 5
-  );
+  const activeWorkScore = Math.max(0, 100 - blockedTasks * 15 - pendingPRs * 5);
 
-  // Service ownership score: having docs and co-owners is better
-  const servicesWithCoOwners = sections.serviceOwnership.ownedServices.filter(
-    (s) => (s.coOwners?.length ?? 0) > 0
-  ).length;
-  const totalServices = Math.max(
-    sections.serviceOwnership.ownedServices.length,
-    1
-  );
-  const serviceOwnershipScore = Math.round(
-    (servicesWithCoOwners / totalServices) * 100
-  );
+  const servicesWithCoOwners = sections.serviceOwnership.ownedServices.filter(s => (s.coOwners?.length ?? 0) > 0).length;
+  const totalServices = Math.max(sections.serviceOwnership.ownedServices.length, 1);
+  const serviceOwnershipScore = Math.round((servicesWithCoOwners / totalServices) * 100);
 
-  // Implicit knowledge score: fewer unresolved debt items = better
-  const highSeverityDebt = sections.implicitKnowledge.techDebt.filter(
-    (d) => d.severity === "high"
-  ).length;
+  const highSeverityDebt = sections.implicitKnowledge.techDebt.filter(d => d.severity === "high").length;
   const implicitKnowledgeScore = Math.max(0, 100 - highSeverityDebt * 20);
 
-  // Security score: fewer critical alerts = better
-  const criticalAlerts = sections.secretAudit.alerts.filter(
-    (a) => a.severity === "critical"
-  ).length;
-  const highAlerts = sections.secretAudit.alerts.filter(
-    (a) => a.severity === "high"
-  ).length;
-  const securityAuditScore = Math.max(
-    0,
-    100 - criticalAlerts * 30 - highAlerts * 15
-  );
+  const criticalAlerts = sections.secretAudit.alerts.filter(a => a.severity === "critical").length;
+  const highAlerts = sections.secretAudit.alerts.filter(a => a.severity === "high").length;
+  const securityAuditScore = Math.max(0, 100 - criticalAlerts * 30 - highAlerts * 15);
 
   const readinessScore = Math.round(
-    (activeWorkScore * 0.3 +
-      serviceOwnershipScore * 0.25 +
-      implicitKnowledgeScore * 0.25 +
-      securityAuditScore * 0.2)
+    activeWorkScore * 0.3 + serviceOwnershipScore * 0.25 +
+    implicitKnowledgeScore * 0.25 + securityAuditScore * 0.2
   );
 
-  return {
-    readinessScore,
-    readinessBreakdown: {
-      activeWork: activeWorkScore,
-      serviceOwnership: serviceOwnershipScore,
-      implicitKnowledge: implicitKnowledgeScore,
-      securityAudit: securityAuditScore,
-    },
-  };
+  return { readinessScore, readinessBreakdown: { activeWork: activeWorkScore, serviceOwnership: serviceOwnershipScore, implicitKnowledge: implicitKnowledgeScore, securityAudit: securityAuditScore } };
 }
 
-// ─── Main Synthesize Function ─────────────────────────────────────────────────
+export async function synthesizeDossier(req: SynthesizeRequest) {
+  const [activeWork, serviceOwnership, implicitKnowledge, secretAudit] = await Promise.all([
+    synthesizeActiveWork(req),
+    synthesizeServiceOwnership(req),
+    synthesizeImplicitKnowledge(req),
+    synthesizeSecretAudit(req),
+  ]);
 
-export async function synthesizeDossier(
-  req: SynthesizeRequest
-): Promise<HandoverDossier> {
-  const [activeWork, serviceOwnership, implicitKnowledge, secretAudit] =
-    await Promise.all([
-      synthesizeActiveWork(req),
-      synthesizeServiceOwnership(req),
-      synthesizeImplicitKnowledge(req),
-      synthesizeSecretAudit(req),
-    ]);
+  const sections = { activeWork, serviceOwnership, implicitKnowledge, secretAudit };
+  const { readinessScore, readinessBreakdown } = calculateReadinessScore(sections);
 
-  const now = new Date().toISOString();
-  const partial = {
-    departingEmployee: req.employeeInfo,
-    sections: { activeWork, serviceOwnership, implicitKnowledge, secretAudit },
-    rawActivity: {
-      commits: req.githubData?.commits ?? [],
-      pullRequests: req.githubData?.pullRequests ?? [],
-      slackMessages: req.slackData?.messages ?? [],
-      meetingTranscripts: req.meetingData?.transcripts ?? [],
-      docs: req.docsData?.pages ?? [],
-    },
-  };
-
-  const { readinessScore, readinessBreakdown } =
-    calculateReadinessScore(partial);
-
-  return {
-    id: generateId(),
-    ...partial,
-    generatedAt: now,
-    lastUpdated: now,
-    readinessScore,
-    readinessBreakdown,
-  };
+  return { sections, readinessScore, readinessBreakdown };
 }
-
