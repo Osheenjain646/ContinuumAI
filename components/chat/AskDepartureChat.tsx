@@ -173,6 +173,9 @@ export function AskDepartureChat({ dossier }: { dossier: HandoverDossier }) {
       });
 
       const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error ?? "Chat request failed. Please try again.");
+      }
 
       if (data.interactionId) {
         setPreviousInteractionId(data.interactionId);
@@ -187,13 +190,14 @@ export function AskDepartureChat({ dossier }: { dossier: HandoverDossier }) {
       };
 
       setMessages((prev) => [...prev, assistantMsg]);
-    } catch {
+    } catch (error) {
       setMessages((prev) => [
         ...prev,
         {
           id: generateId(),
           role: "assistant",
-          content: "Sorry, I encountered an error. Please try again.",
+          content:
+            error instanceof Error ? error.message : "Sorry, I encountered an error. Please try again.",
           timestamp: new Date().toISOString(),
         },
       ]);
@@ -305,4 +309,3 @@ export function AskDepartureChat({ dossier }: { dossier: HandoverDossier }) {
     </Card>
   );
 }
-
