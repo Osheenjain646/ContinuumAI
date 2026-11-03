@@ -409,7 +409,10 @@ export default function DossierDashboard({ dossier: initialDossier }: { dossier:
 
             <TabsContent value="active-work">
               {dossier.sections?.activeWork
-                ? <ActiveWorkPanel section={dossier.sections.activeWork} />
+                ? <ActiveWorkPanel
+                    section={dossier.sections.activeWork}
+                    commits={dossier.rawActivity?.commits ?? []}
+                  />
                 : <EmptySection label="Active Work" />}
             </TabsContent>
             <TabsContent value="ownership">

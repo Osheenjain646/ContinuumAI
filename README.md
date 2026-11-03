@@ -20,7 +20,7 @@ Open [http://localhost:3000](http://localhost:3000) with your browser to see the
 
 Register an account, sign in, and open **Integrations** to configure sources for that account. Integration settings and dossiers are stored per user; all integrations are optional. A refresh reads only configured targets:
 
-- GitHub repositories or organization, GitLab projects, and Bitbucket repositories: up to the latest 100 commits per selected repo/project (an organization URL is capped at 100 commits total).
+- GitHub repositories or organization, GitLab projects, and Bitbucket repositories: up to the latest 10 commits per selected repo/project (an organization URL is capped at 10 commits total).
 - Slack channels, Notion pages/databases, Jira projects for the configured employee, and Linear teams/member.
 - Confluence spaces, Asana tasks for the configured user/workspace, direct meeting transcript URLs, Google Docs transcripts, and custom company-specific HTTPS URLs.
 

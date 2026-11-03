@@ -417,7 +417,7 @@ export default function IntegrationsPage() {
               label="Specific Repos to Track"
               values={arr(gh.repos)}
               onChange={(v) => set("github", "repos", v)}
-              hint="Add owner/repo values or repository URLs — up to 100 commits per repo"
+              hint="Add owner/repo values or repository URLs — up to 10 commits per repo"
               placeholder="org/repo-name or https://github.com/org/repo"
             />
           </div>

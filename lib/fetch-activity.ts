@@ -1,7 +1,7 @@
 /**
  * Multi-source activity fetcher
  * Reads from user-provided integration configs — only fetches from configured sources.
- * Fetches last 100 commits from each configured git platform.
+ * Fetches last 10 commits from each configured git platform.
  */
 
 import type {
@@ -16,7 +16,7 @@ import type {
 } from "@/types";
 import { isIP } from "node:net";
 
-const COMMIT_LIMIT = 100;
+const COMMIT_LIMIT = 10;
 type GitHubTarget = { repo?: string; org?: string };
 const MAX_SOURCE_BYTES = 1_000_000;
 

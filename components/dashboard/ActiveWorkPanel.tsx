@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  GitBranch,
   GitPullRequest,
   Clock,
   AlertCircle,
@@ -12,7 +13,7 @@ import {
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, Badge } from "@/components/ui";
 import { cn, formatRelativeTime, statusColor, prStateColor } from "@/lib/utils";
-import type { ActiveWorkSection } from "@/types";
+import type { ActiveWorkSection, GitHubCommit } from "@/types";
 
 function statusIcon(status: string) {
   switch (status) {
@@ -44,7 +45,13 @@ function priorityDot(priority: string) {
   );
 }
 
-export function ActiveWorkPanel({ section }: { section: ActiveWorkSection }) {
+export function ActiveWorkPanel({
+  section,
+  commits,
+}: {
+  section: ActiveWorkSection;
+  commits: GitHubCommit[];
+}) {
   const { inFlightTasks, pendingPRReviews, openBugs, upcomingDeadlines } = section;
 
   return (
@@ -122,6 +129,44 @@ export function ActiveWorkPanel({ section }: { section: ActiveWorkSection }) {
           ))}
         </CardContent>
       </Card>
+
+      {commits.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <GitBranch size={16} className="text-violet-500" />
+              Recent Commits
+              <Badge variant="secondary" className="ml-auto">
+                {commits.length}
+              </Badge>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2.5">
+            {commits.map((commit) => (
+              <a
+                key={`${commit.repo}-${commit.sha}`}
+                href={commit.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-start gap-2.5 rounded-lg border border-zinc-100 bg-zinc-50/50 p-3 hover:border-zinc-200 hover:bg-zinc-50 transition-colors group"
+              >
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-zinc-900 truncate">
+                    {commit.message}
+                  </p>
+                  <p className="text-xs text-zinc-400 mt-0.5">
+                    {commit.repo} · {commit.sha} · {formatRelativeTime(commit.date)}
+                  </p>
+                </div>
+                <ArrowUpRight
+                  size={12}
+                  className="shrink-0 text-zinc-400 group-hover:text-zinc-600"
+                />
+              </a>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Pending PR Reviews */}
@@ -265,4 +310,3 @@ export function ActiveWorkPanel({ section }: { section: ActiveWorkSection }) {
     </div>
   );
 }
-
