@@ -1,20 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@/auth";
 import { chatWithDossier } from "@/lib/chat";
+import { getDossierById, getUserDossiers } from "@/lib/db/store";
 import { generateMockDossier } from "@/lib/mock-data";
 import type { ChatRequest } from "@/types";
 
-// In production, you would fetch the dossier from a database
-// For now we use the mock dossier as the knowledge base
 export async function POST(req: NextRequest) {
   try {
     const body: ChatRequest = await req.json();
-    const { message, previousInteractionId } = body;
+    const { message, previousInteractionId, dossierId } = body;
 
     if (!message?.trim()) {
-      return NextResponse.json(
-        { error: "Message is required" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "Message is required" }, { status: 400 });
     }
 
     if (!process.env.GEMINI_API_KEY) {
@@ -28,22 +25,31 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // In production: fetch dossier from DB by dossierId
-    const dossier = generateMockDossier();
+    // Try to load the real dossier for authenticated users
+    let dossier = null;
+    const session = await auth();
+    if (session?.user?.id) {
+      if (dossierId) {
+        dossier = await getDossierById(session.user.id, dossierId);
+        if (!dossier) {
+          return NextResponse.json({ error: "Dossier not found" }, { status: 404 });
+        }
+      } else {
+        const all = await getUserDossiers(session.user.id);
+        dossier = all.find((d) => d.status === "complete") ?? all[0] ?? null;
+      }
+    }
 
-    const response = await chatWithDossier(
-      dossier,
-      message,
-      previousInteractionId
-    );
+    // Fall back to mock dossier if none found
+    if (!dossier) {
+      dossier = generateMockDossier();
+    }
+
+    const response = await chatWithDossier(dossier, message, previousInteractionId);
 
     return NextResponse.json(response);
   } catch (err) {
     console.error("[api/chat] error:", err);
-    return NextResponse.json(
-      { error: "Chat request failed" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Chat request failed" }, { status: 500 });
   }
 }
-

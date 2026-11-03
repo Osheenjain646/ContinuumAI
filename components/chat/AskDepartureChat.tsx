@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState, useRef, useEffect } from "react";
 import {
@@ -31,11 +31,13 @@ function SourceChip({
 }: {
   source: NonNullable<ChatMessage["sources"]>[0];
 }) {
-  const icons = {
+  const icons: Record<string, React.ReactElement> = {
     github: <GitBranch size={10} />,
     slack: <MessageSquare size={10} />,
     meeting: <MessageSquare size={10} />,
     doc: <BookOpen size={10} />,
+    jira: <BookOpen size={10} />,
+    gitlab: <GitBranch size={10} />,
   };
 
   return (
@@ -132,7 +134,7 @@ export function AskDepartureChat({ dossier }: { dossier: HandoverDossier }) {
     {
       id: "welcome",
       role: "assistant",
-      content: `Hi! I'm Continuum — your AI guide to ${dossier.departingEmployee.name}'s work and context.\n\nI've indexed their commits, Slack threads, meeting transcripts, and documentation. Ask me anything about their systems, workflows, or handover items.`,
+      content: `Hi! I'm Continuum â€” your AI guide to ${dossier.departingEmployee.name}'s work and context.\n\nI've indexed their commits, Slack threads, meeting transcripts, and documentation. Ask me anything about their systems, workflows, or handover items.`,
       timestamp: new Date().toISOString(),
     },
   ]);
@@ -212,7 +214,7 @@ export function AskDepartureChat({ dossier }: { dossier: HandoverDossier }) {
       {
         id: "welcome",
         role: "assistant",
-        content: `Hi! I'm Continuum — your AI guide to ${dossier.departingEmployee.name}'s work and context. Ask me anything!`,
+        content: `Hi! I'm Continuum â€” your AI guide to ${dossier.departingEmployee.name}'s work and context. Ask me anything!`,
         timestamp: new Date().toISOString(),
       },
     ]);
@@ -279,7 +281,7 @@ export function AskDepartureChat({ dossier }: { dossier: HandoverDossier }) {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Ask about deployment keys, ownership, workflows…"
+            placeholder="Ask about deployment keys, ownership, workflowsâ€¦"
             className="flex-1 min-h-[60px] max-h-[120px] text-sm resize-none"
             disabled={isLoading}
           />
@@ -297,9 +299,10 @@ export function AskDepartureChat({ dossier }: { dossier: HandoverDossier }) {
           </Button>
         </div>
         <p className="mt-1.5 text-[10px] text-zinc-400">
-          Press Enter to send · Shift+Enter for new line
+          Press Enter to send Â· Shift+Enter for new line
         </p>
       </div>
     </Card>
   );
 }
+

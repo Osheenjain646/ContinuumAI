@@ -52,6 +52,8 @@ async function synthesizeActiveWork(req: SynthesizeRequest): Promise<ActiveWorkS
     meetingActionItems: req.meetingData?.transcripts?.flatMap((t) => t.actionItems) ?? [],
     jiraIssues: req.docsData?.pages?.filter((p) => p.source === "jira") ?? [],
     linearIssues: req.docsData?.pages?.filter((p) => p.source === "linear") ?? [],
+    asanaTasks: req.docsData?.pages?.filter((p) => p.source === "asana") ?? [],
+    confluencePages: req.docsData?.pages?.filter((p) => p.source === "confluence") ?? [],
   };
 
   return llmJson<ActiveWorkSection>(`${NOISE_FILTER_SYSTEM}
@@ -109,7 +111,7 @@ RAW DATA: ${JSON.stringify(rawData, null, 2)}
 
 Return JSON matching:
 {
-  techDebt: Array<{ id: string; title: string; description: string; source: "slack"|"github-pr"|"github-commit"|"notion"|"google-docs"|"jira"|"gitlab"|"bitbucket"; sourceUrl: string; severity: "high"|"medium"|"low"; category: "workaround"|"unwritten-rule"|"architectural-debt"|"edge-case"; tags?: string[] }>;
+  techDebt: Array<{ id: string; title: string; description: string; source: "slack"|"github-pr"|"github-commit"|"notion"|"google-docs"|"jira"|"gitlab"|"bitbucket"|"confluence"|"linear"|"asana"|"custom"; sourceUrl: string; severity: "high"|"medium"|"low"; category: "workaround"|"unwritten-rule"|"architectural-debt"|"edge-case"; tags?: string[] }>;
   workarounds: Array<{ title: string; description: string; affectedSystem: string; sourceUrl: string; crossRefs?: Array<{ slackThreadUrl?: string; githubPrUrl?: string; summary: string }> }>;
   architecturalDecisions: Array<{ title: string; rationale: string; alternatives?: string; date: string; participants?: string[]; sourceUrl?: string }>;
 }`, { techDebt: [], workarounds: [], architecturalDecisions: [] });
@@ -135,6 +137,38 @@ Return JSON matching:
   cloudResources: Array<{ name: string; type: string; provider: string; region?: string; linkedToUser: boolean; status: "active"|"idle"|"orphaned"; url?: string }>;
   accessRecommendations: string[];
 }`, { alerts: [], cloudResources: [], accessRecommendations: [] });
+}
+
+function repositoriesFromCommits(commits: GitHubCommit[]) {
+  const repositories = new Map<string, {
+    name: string;
+    url: string;
+    primaryLanguage?: string;
+    description?: string;
+    isPrivate?: boolean;
+  }>();
+
+  for (const commit of commits) {
+    let url: string;
+    if (commit.repo.startsWith("gitlab:")) {
+      const marker = commit.url.indexOf("/-/");
+      url = marker === -1 ? commit.url : commit.url.slice(0, marker);
+    } else if (commit.repo.startsWith("bitbucket:")) {
+      const marker = commit.url.indexOf("/commits/");
+      url = marker === -1 ? commit.url : commit.url.slice(0, marker);
+    } else {
+      url = `https://github.com/${commit.repo}`;
+    }
+
+    if (!repositories.has(commit.repo)) {
+      repositories.set(commit.repo, {
+        name: commit.repo.replace(/^(gitlab|bitbucket):/, ""),
+        url,
+      });
+    }
+  }
+
+  return [...repositories.values()];
 }
 
 function calculateReadinessScore(sections: {
@@ -175,6 +209,15 @@ export async function synthesizeDossier(req: SynthesizeRequest) {
   ]);
 
   const sections = { activeWork, serviceOwnership, implicitKnowledge, secretAudit };
+  const knownRepositories = new Map(
+    serviceOwnership.repositories.map((repository) => [repository.name, repository])
+  );
+  for (const repository of repositoriesFromCommits(req.githubData?.commits ?? [])) {
+    if (![...knownRepositories.values()].some((known) => known.url === repository.url)) {
+      knownRepositories.set(repository.name, repository);
+    }
+  }
+  sections.serviceOwnership.repositories = [...knownRepositories.values()];
   const { readinessScore, readinessBreakdown } = calculateReadinessScore(sections);
 
   return { sections, readinessScore, readinessBreakdown };

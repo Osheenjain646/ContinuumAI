@@ -27,6 +27,7 @@ export interface GitLabIntegration {
 
 export interface BitbucketIntegration {
   username?: string;
+  accountId?: string;
   appPassword?: string;
   workspace?: string;
   repoSlugs?: string[];
@@ -165,7 +166,7 @@ export interface DocPage {
   id: string;
   title: string;
   url: string;
-  source: "google-docs" | "notion" | "confluence" | "jira" | "linear" | "custom";
+  source: "google-docs" | "notion" | "confluence" | "jira" | "linear" | "asana" | "custom";
   lastModified: string;
   snippet: string;
   tags?: string[];
@@ -197,7 +198,7 @@ export interface TechDebtItem {
   id: string;
   title: string;
   description: string;
-  source: "slack" | "github-pr" | "github-commit" | "notion" | "google-docs" | "jira" | "gitlab" | "bitbucket";
+  source: "slack" | "github-pr" | "github-commit" | "notion" | "google-docs" | "jira" | "gitlab" | "bitbucket" | "confluence" | "linear" | "asana" | "custom";
   sourceUrl: string;
   severity: "high" | "medium" | "low";
   category: "workaround" | "unwritten-rule" | "architectural-debt" | "edge-case";
@@ -281,7 +282,7 @@ export interface EmployeeInfo {
   avatarUrl?: string;
 }
 
-// ─── Stored Dossier (persisted to disk) ──────────────────────────────────────
+// ─── Stored Dossier (persisted in MongoDB) ────────────────────────────────────
 
 export interface StoredDossier {
   id: string;
@@ -292,6 +293,7 @@ export interface StoredDossier {
   status: "pending" | "fetching" | "synthesizing" | "complete" | "error";
   progress?: number;     // 0-100
   errorMessage?: string;
+  fetchWarnings?: string[];
   readinessScore: number;
   readinessBreakdown: {
     activeWork: number;
@@ -358,4 +360,17 @@ export interface SessionUser {
   name: string;
   email: string;
   avatarUrl?: string;
+}
+
+// ─── HandoverDossier alias ────────────────────────────────────────────────────
+// StoredDossier is the canonical type; HandoverDossier is kept as an alias
+// for backward compatibility with chat and dashboard components.
+export type HandoverDossier = StoredDossier;
+
+// ─── Chat Request ─────────────────────────────────────────────────────────────
+
+export interface ChatRequest {
+  dossierId?: string;
+  message: string;
+  previousInteractionId?: string;
 }

@@ -1,9 +1,17 @@
-/**
+﻿/**
  * Slack API Driver
  * Fetches user activity: messages, thread participations, channel mentions
  */
 
-import type { SlackMessage, FetchSlackActivityRequest } from "@/types";
+import type { SlackMessage } from "@/types";
+
+// Legacy request type — used internally by this driver only
+interface FetchSlackActivityRequest {
+  userId: string;
+  token?: string;
+  channelIds?: string[];
+  daysBack?: number;
+}
 
 const SLACK_API_BASE = "https://slack.com/api";
 
@@ -39,7 +47,7 @@ async function slackFetch<T>(
   return data;
 }
 
-// ─── Fetch channels the user is a member of ─────────────────────────────────
+// â”€â”€â”€ Fetch channels the user is a member of â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function fetchUserChannels(
   userId: string,
@@ -65,7 +73,7 @@ async function fetchUserChannels(
   }
 }
 
-// ─── Fetch messages in a channel matching user ────────────────────────────────
+// â”€â”€â”€ Fetch messages in a channel matching user â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function fetchChannelMessages(
   channelId: string,
@@ -118,7 +126,7 @@ async function fetchChannelMessages(
   }
 }
 
-// ─── Search Slack for user-specific messages ─────────────────────────────────
+// â”€â”€â”€ Search Slack for user-specific messages â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export async function searchSlackForUser(
   req: FetchSlackActivityRequest
@@ -165,8 +173,8 @@ export async function searchSlackForUser(
   } catch {
     // Fallback: fetch from user's channels
     const channels = await fetchUserChannels(userId, token);
-    const targetChannels = req.channels
-      ? channels.filter((c) => req.channels?.includes(c.name))
+    const targetChannels = req.channelIds
+      ? channels.filter((c) => req.channelIds?.includes(c.name))
       : channels.slice(0, 10); // limit to 10 channels
 
     const allMessages: SlackMessage[] = [];
@@ -191,4 +199,5 @@ export async function fetchAllSlackActivity(req: FetchSlackActivityRequest) {
   const messages = await searchSlackForUser(req);
   return { messages };
 }
+
 

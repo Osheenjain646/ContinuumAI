@@ -147,25 +147,60 @@ export default function DossiersClient({ initialDossiers }: { initialDossiers: S
 
   const handleFetch = async (dossierId: string) => {
     setFetchingId(dossierId);
-    setDossiers(prev => prev.map(d => d.id === dossierId ? { ...d, status: "fetching" } : d));
-    try {
-      await fetch(`/api/dossiers/${dossierId}/fetch`, { method: "POST" });
-      // Poll for completion
-      const poll = setInterval(async () => {
+    setDossiers(prev => prev.map(d => d.id === dossierId ? {
+      ...d,
+      status: "fetching",
+      progress: 5,
+      errorMessage: undefined,
+    } : d));
+    let finished = false;
+    let polling = false;
+    const stopPolling = () => {
+      finished = true;
+      clearInterval(poll);
+      setFetchingId((current) => current === dossierId ? null : current);
+    };
+    const pollStatus = async () => {
+      if (finished || polling) return;
+      polling = true;
+      try {
         const res = await fetch(`/api/dossiers/${dossierId}`);
+        if (!res.ok) throw new Error("Unable to retrieve dossier status.");
         const data = await res.json() as StoredDossier;
         setDossiers(prev => prev.map(d => d.id === dossierId ? {
-          ...d, status: data.status, progress: data.progress,
+          ...d,
+          status: data.status,
+          progress: data.progress,
           readinessScore: data.readinessScore,
+          errorMessage: data.errorMessage,
           commitCount: data.rawActivity?.commits?.length ?? 0,
           alertCount: data.sections?.secretAudit?.alerts?.length ?? 0,
         } : d));
-        if (data.status === "complete" || data.status === "error") {
-          clearInterval(poll);
-          setFetchingId(null);
-        }
-      }, 3000);
-    } catch { setFetchingId(null); }
+        if (data.status === "complete" || data.status === "error") stopPolling();
+      } catch {
+        // Keep polling during transient status request failures.
+      } finally {
+        polling = false;
+      }
+    };
+    const poll = setInterval(() => { void pollStatus(); }, 1500);
+    void pollStatus();
+
+    try {
+      const response = await fetch(`/api/dossiers/${dossierId}/fetch`, { method: "POST" });
+      if (!response.ok) {
+        const result = await response.json() as { error?: string };
+        throw new Error(result.error ?? "Unable to fetch this dossier.");
+      }
+      await pollStatus();
+    } catch (err) {
+      setDossiers(prev => prev.map(d => d.id === dossierId ? {
+        ...d,
+        status: "error",
+        errorMessage: err instanceof Error ? err.message : "Unable to fetch this dossier.",
+      } : d));
+      stopPolling();
+    }
   };
 
   const handleDelete = async (dossierId: string) => {
@@ -236,6 +271,12 @@ export default function DossiersClient({ initialDossiers }: { initialDossiers: S
                     </div>
                   )}
 
+                  {d.status === "error" && (
+                    <p className="mt-2 text-xs text-red-600">
+                      {d.errorMessage || "Fetch failed. Check your integrations and try again."}
+                    </p>
+                  )}
+
                   {d.status === "complete" && (
                     <div className="mt-2 flex gap-3">
                       <span className={cn("text-lg font-bold", scoreToColor(d.readinessScore))}>{d.readinessScore}%</span>
@@ -277,4 +318,3 @@ export default function DossiersClient({ initialDossiers }: { initialDossiers: S
     </div>
   );
 }
-

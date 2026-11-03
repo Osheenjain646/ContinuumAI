@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Mock data generator for demo/development purposes
  * Generates a realistic HandoverDossier without requiring real API keys
  */
@@ -8,6 +8,8 @@ import type { HandoverDossier } from "@/types";
 export function generateMockDossier(): HandoverDossier {
   return {
     id: "demo-001",
+    ownerId: "demo-user",
+    status: "complete",
     departingEmployee: {
       name: "Alex Rivera",
       email: "alex.rivera@acmecorp.com",
@@ -289,7 +291,7 @@ export function generateMockDossier(): HandoverDossier {
           {
             title: "Chose Vault over AWS Secrets Manager for secrets",
             rationale:
-              "AWS Secrets Manager was evaluated but rejected due to cost ($0.40/secret/month × 400+ secrets) and multi-cloud requirements. HashiCorp Vault on EKS was chosen for flexibility and cost efficiency.",
+              "AWS Secrets Manager was evaluated but rejected due to cost ($0.40/secret/month Ã— 400+ secrets) and multi-cloud requirements. HashiCorp Vault on EKS was chosen for flexibility and cost efficiency.",
             alternatives:
               "AWS Secrets Manager, GCP Secret Manager, Kubernetes Secrets with SOPS encryption",
             date: new Date(Date.now() - 180 * 24 * 60 * 60 * 1000).toISOString(),
@@ -399,7 +401,7 @@ export function generateMockDossier(): HandoverDossier {
           },
         ],
         accessRecommendations: [
-          "Revoke GitHub PAT belonging to Alex (check organization → Settings → Personal access tokens)",
+          "Revoke GitHub PAT belonging to Alex (check organization â†’ Settings â†’ Personal access tokens)",
           "Remove SSH authorized key 'alex-macbook-work' from all bastion and EC2 instances",
           "Disable AWS IAM user 'alex-rivera-personal' and rotate any credentials it created",
           "Transfer Vault root token to security team and regenerate AppRole for secret-rotation-cron",
@@ -454,7 +456,7 @@ export function generateMockDossier(): HandoverDossier {
           id: "msg-001",
           channel: "infra-ops",
           channelId: "C01INFRA",
-          text: "Hey team — the Vault AppRole for secret-rotation-cron expires Dec 15. I was going to handle the renewal but now with my transition I'll need to hand this over. The root creds are in my 1Pass vault under 'Vault Root Token'.",
+          text: "Hey team â€” the Vault AppRole for secret-rotation-cron expires Dec 15. I was going to handle the renewal but now with my transition I'll need to hand this over. The root creds are in my 1Pass vault under 'Vault Root Token'.",
           timestamp: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
           url: "https://acmecorp.slack.com/archives/C01INFRA/p1699451234",
         },
@@ -503,4 +505,5 @@ export function generateMockDossier(): HandoverDossier {
     },
   };
 }
+
 
