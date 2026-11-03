@@ -7,7 +7,7 @@ import { GoogleGenAI } from "@google/genai";
 import type { HandoverDossier, ChatMessage } from "@/types";
 import { generateId } from "@/lib/utils";
 
-const client = new GoogleGenAI({});
+const geminiFetch = globalThis.fetch.bind(globalThis);
 const MODEL = "gemini-3.8-flash";
 
 // Build a rich context document from the dossier
@@ -100,6 +100,17 @@ export async function chatWithDossier(
   userMessage: string,
   previousInteractionId?: string
 ): Promise<ChatMessage> {
+  console.log(process.env.GEMINI_API_KEY, 1);
+  
+  const apiKey = process.env.GEMINI_API_KEY?.trim();
+  if (!apiKey) {
+    throw new Error("GEMINI_API_KEY is not configured");
+  }
+
+  const client = new GoogleGenAI({
+    apiKey,
+    httpOptions: { fetch: geminiFetch },
+  });
   const context = buildDossierContext(dossier);
 
   const systemInstruction = `You are "Continuum", an AI assistant that helps team members understand the work and context left behind by ${dossier.departingEmployee.name}, who has left or is transitioning out of the team.
@@ -132,49 +143,38 @@ GUIDELINES:
     interactionParams.previous_interaction_id = previousInteractionId;
   }
 
-  try {
-    const interactionResult = await client.interactions.create(interactionParams);
-    // interactions.create with stream:false returns GoogleGenAIInteraction
-    const interaction = interactionResult as import("@google/genai").GoogleGenAIInteraction;
-    const responseText = interaction.output_text ?? "I couldn't generate a response. Please try again.";
+  const interactionResult = await client.interactions.create(interactionParams);
+  // interactions.create with stream:false returns GoogleGenAIInteraction
+  const interaction = interactionResult as import("@google/genai").GoogleGenAIInteraction;
+  const responseText = interaction.output_text ?? "I couldn't generate a response. Please try again.";
 
-    // Extract source citations from the response (simple heuristic)
-    const urlRegex = /https?:\/\/[^\s)]+/g;
-    const foundUrls = responseText.match(urlRegex) ?? [];
+  // Extract source citations from the response (simple heuristic)
+  const urlRegex = /https?:\/\/[^\s)]+/g;
+  const foundUrls = responseText.match(urlRegex) ?? [];
 
-    const sources: NonNullable<ChatMessage["sources"]> = foundUrls
-      .slice(0, 5)
-      .map((url: string) => {
-        let type: NonNullable<ChatMessage["sources"]>[0]["type"] = "doc";
-        if (url.includes("github.com")) type = "github";
-        else if (url.includes("slack.com")) type = "slack";
-        else if (url.includes("meet.google.com") || url.includes("zoom.us"))
-          type = "meeting";
+  const sources: NonNullable<ChatMessage["sources"]> = foundUrls
+    .slice(0, 5)
+    .map((url: string) => {
+      let type: NonNullable<ChatMessage["sources"]>[0]["type"] = "doc";
+      if (url.includes("github.com")) type = "github";
+      else if (url.includes("slack.com")) type = "slack";
+      else if (url.includes("meet.google.com") || url.includes("zoom.us"))
+        type = "meeting";
 
-        return {
-          type,
-          title: url.split("/").slice(-2).join("/"),
-          url,
-        };
-      });
+      return {
+        type,
+        title: url.split("/").slice(-2).join("/"),
+        url,
+      };
+    });
 
-    return {
-      id: generateId(),
-      role: "assistant",
-      content: responseText,
-      timestamp: new Date().toISOString(),
-      sources: sources.length > 0 ? sources : undefined,
-      // Store the interaction ID so the next message can continue the thread
-      ...(interaction.id ? { interactionId: interaction.id } : {}),
-    } as ChatMessage & { interactionId?: string };
-  } catch (err) {
-    console.error("[chat] chatWithDossier error:", err);
-    return {
-      id: generateId(),
-      role: "assistant",
-      content:
-        "I encountered an error processing your question. Please check that your Gemini API key is configured and try again.",
-      timestamp: new Date().toISOString(),
-    };
-  }
+  return {
+    id: generateId(),
+    role: "assistant",
+    content: responseText,
+    timestamp: new Date().toISOString(),
+    sources: sources.length > 0 ? sources : undefined,
+    // Store the interaction ID so the next message can continue the thread
+    ...(interaction.id ? { interactionId: interaction.id } : {}),
+  } as ChatMessage & { interactionId?: string };
 }

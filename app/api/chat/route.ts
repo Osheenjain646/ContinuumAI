@@ -14,14 +14,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Message is required" }, { status: 400 });
     }
 
-    if (!process.env.GEMINI_API_KEY) {
+    if (!process.env.GEMINI_API_KEY?.trim()) {
       return NextResponse.json(
-        {
-          content:
-            "⚠️ GEMINI_API_KEY is not configured. Please add it to your .env.local file to enable the AI chat feature.",
-          sources: [],
-        },
-        { status: 200 }
+        { error: "GEMINI_API_KEY is not configured. Add it to your .env.local file." },
+        { status: 503 }
       );
     }
 
@@ -45,7 +41,16 @@ export async function POST(req: NextRequest) {
       dossier = generateMockDossier();
     }
 
-    const response = await chatWithDossier(dossier, message, previousInteractionId);
+    let response;
+    try {
+      response = await chatWithDossier(dossier, message, previousInteractionId);
+    } catch (err) {
+      console.error("[api/chat] Gemini request failed:", err);
+      return NextResponse.json(
+        { error: "Unable to reach Gemini. Check the API key and server network connection." },
+        { status: 502 }
+      );
+    }
 
     return NextResponse.json(response);
   } catch (err) {
